@@ -1,0 +1,10 @@
+.vscode
+venv
+*.png
+*.html
+*.env
+**/__pycache__
+.git
+.DS_Store
+*.lock
+Pipfile
