@@ -1,3 +1,5 @@
+from distutils.util import change_root
+from email.headerregistry import ContentTypeHeader
 from selenium.webdriver.chrome.webdriver import WebDriver
 from logzero import logger
 import logzero
@@ -14,6 +16,7 @@ from selenium import webdriver
 import os, time
 
 import boto3
+import botocore
 
 class KamakuraLibrary():
     def init(self):
@@ -88,7 +91,7 @@ class KamakuraLibrary():
                 if len(tds) != 9:
                     continue
                 update_txt:str = tds[1].text
-                book['title'] = tds[2].find_element_by_xpath('a').text
+                book['title'] = tds[2].text
                 book['deadline'] = tds[8].text
                 book['booking_request'] = len(update_txt) > 0 and "予約" in update_txt
                 books.append(book)
@@ -129,12 +132,48 @@ class KamakuraLibrary():
             time.sleep(0.1)
 
     def upload(self, data:dict):
-        logger.info(f"情報をS3へアップロードします")
+        logger.info(f"貸し出し履歴をS3からダウンロードします")
         s3 = boto3.resource('s3')
-        obj = s3.Object(os.environ['KAMALIB_S3BUCKET'], os.environ['KAMALIB_S3KEY'])
+        s3bucket = os.environ['KAMALIB_S3BUCKET']
+        s3key = os.environ['KAMALIB_S3KEY']
+        folder = os.path.dirname(s3key)
+        basename = os.path.splitext(os.path.basename(s3key))[0]
+        s3key_history = f"{folder}/{basename}-history.json"
+        history_obj = s3.Object(s3bucket, s3key_history)
+        history_dict:dict = {}
+        try:
+            history_dict = json.loads(history_obj.get()['Body'].read().decode('utf-8'))
+        except botocore.exceptions.ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                logger.debug("history not found.")
+            else:
+                raise e
+        logger.info(f"現在の貸し出し図書をS3へアップロードします")
+        obj = s3.Object(s3bucket, s3key)
         r = obj.put(Body = json.dumps(data))
         if r['ResponseMetadata']['HTTPStatusCode'] != 200:
             raise RuntimeError(f's3 upload response:{r}')
+
+        change_flag = False
+        for name, books in data.items():
+            for book in books:
+                title = book["title"]
+                deadline = book["deadline"]
+                if title in history_dict:
+                    if not deadline in history_dict[title]:
+                        logger.debug(f"貸し出し履歴の [{title}] に新たな返却日を追加しました")
+                        history_dict[title].append(deadline)
+                        change_flag = True
+                else:
+                    logger.debug(f"貸し出し履歴に [{title}] を追加しました")
+                    history_dict[title] = [deadline]
+                    change_flag = True
+        if change_flag:
+            logger.info(f"貸し出し履歴をS3へアップロードします")
+            history_obj = s3.Object(s3bucket, s3key_history)
+            r = history_obj.put(Body = json.dumps(history_dict))
+            if r['ResponseMetadata']['HTTPStatusCode'] != 200:
+                raise RuntimeError(f's3 upload response:{r}')
 
 if __name__ == "__main__":
     if "LOG_LEVEL" in os.environ:
