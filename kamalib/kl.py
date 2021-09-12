@@ -42,7 +42,7 @@ class KamakuraLibrary():
         options.add_argument('--user-agent=Mozilla/5.0')
         options.add_argument('--disable-dev-shm-usage')
         self.driver:WebDriver = webdriver.Chrome(options=options)
-        self.driver.implicitly_wait(1)
+        self.driver.implicitly_wait(10)
         self.wait:WebDriverWait = WebDriverWait(self.driver, 30)
 
     def login(self):
@@ -81,22 +81,24 @@ class KamakuraLibrary():
 
             # 貸し出し図書情報を収集する
             logger.info(f"貸し出し図書情報を収集します[{name}]")
-            self.wait_until(By.XPATH, '//*[@id="ContentLend"]/form/div[2]/table')
-            table:WebElement = d.find_element_by_xpath('//*[@id="ContentLend"]/form/div[2]/table')
-            trs:list[WebElement] = table.find_elements_by_xpath('tbody/tr')
-            books:list[str] = list()
-            for tr in trs:
-                book:dict = dict()
-                tds:list[WebElement] = tr.find_elements_by_xpath('td')
-                if len(tds) != 9:
-                    continue
-                update_txt:str = tds[1].text
-                book['title'] = tds[2].text
-                book['deadline'] = tds[8].text
-                book['booking_request'] = len(update_txt) > 0 and "予約" in update_txt
-                books.append(book)
-            
-            all_books[name] = books
+            table_list:list = d.find_elements_by_xpath('//*[@id="ContentLend"]/form/div[2]/table')
+            if len(table_list) > 0:
+                table:WebElement = table_list[0]
+                trs:list[WebElement] = table.find_elements_by_xpath('tbody/tr')
+                books:list[str] = list()
+                for tr in trs:
+                    book:dict = dict()
+                    tds:list[WebElement] = tr.find_elements_by_xpath('td')
+                    if len(tds) != 9:
+                        continue
+                    update_txt:str = tds[1].text
+                    book['title'] = tds[2].text
+                    book['deadline'] = tds[8].text
+                    book['booking_request'] = len(update_txt) > 0 and "予約" in update_txt
+                    books.append(book)
+                all_books[name] = books
+            else:
+                logger.info(f"{name}は借りている本がありません")
             logout_button:WebElement = d.find_element_by_xpath('//button[@onclick="OPWUSERLOGOUT(1)"]')
             logout_button.click()
             w.until(ec.presence_of_all_elements_located)
