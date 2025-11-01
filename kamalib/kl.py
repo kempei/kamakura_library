@@ -31,7 +31,7 @@ class KamakuraLibrary:
         options = webdriver.ChromeOptions()
         options.add_argument("--headless")
         options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=900x1200")
+        options.add_argument("--window-size=1200x1200")
         options.add_argument("--disable-application-cache")
         options.add_argument("--disable-infobars")
         options.add_argument("--no-sandbox")
@@ -46,6 +46,27 @@ class KamakuraLibrary:
         self.driver.implicitly_wait(10)
         self.wait: WebDriverWait = WebDriverWait(self.driver, 30)
 
+    def safe_click(self, by_or_element, locator=None):
+        """ヘッドレスモードでも安全にクリックするためのヘルパーメソッド
+
+        Args:
+            by_or_element: By定数 または WebElement
+            locator: 要素のロケータ（by_or_elementがBy定数の場合のみ必要）
+        """
+        d = self.driver
+        w = self.wait
+
+        if isinstance(by_or_element, WebElement):
+            # 既に取得済みの要素が渡された場合
+            element = by_or_element
+        else:
+            # By定数とロケータが渡された場合
+            element = w.until(ec.element_to_be_clickable((by_or_element, locator)))
+
+        d.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+        time.sleep(0.5)
+        element.click()
+
     def login(self):
         d = self.driver
         w = self.wait
@@ -54,17 +75,15 @@ class KamakuraLibrary:
         for name, idinfo in kamalib_idinfo.items():
             logger.info(f"ログインします[{name}]")
             usercardno, userpasswd = idinfo.split(":")
-            d.get("https://lib.city.kamakura.kanagawa.jp/")
-            w.until(ec.presence_of_all_elements_located)
-            logger.debug("メインが表示されました")
-            self.wait_until(By.ID, "side")
-            logger.debug("サイドバーが表示されました")
-            d.find_element(By.XPATH, '//*[@id="side"]/div[1]/div[2]/button').click()
-            w.until(ec.presence_of_all_elements_located)
+            d.get("https://lib.city.kamakura.kanagawa.jp/opw/OPW/OPWUSERCONF.CSP")
+            w.until(ec.presence_of_element_located((By.NAME, "usercardno")))
+            logger.debug("ログイン画面が表示されました")
             d.find_element(By.NAME, "usercardno").send_keys(usercardno)
             d.find_element(By.NAME, "userpasswd").send_keys(userpasswd)
-            d.find_element(By.NAME, "Login").click()
-            w.until(ec.presence_of_all_elements_located)
+            self.safe_click(By.NAME, "Login")
+            logger.debug("ログイン中です")
+            w.until(ec.presence_of_element_located((By.ID, "ContentLend")))
+            logger.debug("ログインを完了しました")
 
             # 更新ボタンを全部押す
             counter = 0
@@ -73,9 +92,9 @@ class KamakuraLibrary:
                 if len(buttons) == 0:
                     break
                 counter += 1
-                buttons[0].click()
+                self.safe_click(buttons[0])
                 w.until(ec.visibility_of_element_located((By.NAME, "chkLKOUSIN")))
-                d.find_element(By.NAME, "chkLKOUSIN").click()
+                self.safe_click(By.NAME, "chkLKOUSIN")
                 logger.debug("push deadline update button")
                 time.sleep(1)
             if counter > 0:
@@ -83,7 +102,7 @@ class KamakuraLibrary:
 
             # 貸し出し図書情報を収集する
             logger.info(f"貸し出し図書情報を収集します[{name}]")
-            table_list: list = d.find_elements(By.XPATH, '//*[@id="ContentLend"]/form/div[2]/table')
+            table_list: list = d.find_elements(By.XPATH, '//*[@id="ContentLend"]/form/div[3]/table')
             if len(table_list) > 0:
                 table: WebElement = table_list[0]
                 trs: list[WebElement] = table.find_elements(By.XPATH, "tbody/tr")
@@ -101,9 +120,6 @@ class KamakuraLibrary:
                 all_books[name] = books
             else:
                 logger.info(f"{name}は借りている本がありません")
-            logout_button: WebElement = d.find_element(By.XPATH, '//button[@onclick="OPWUSERLOGOUT(1)"]')
-            logout_button.click()
-            w.until(ec.presence_of_all_elements_located)
         logger.debug(all_books)
         return all_books
 
